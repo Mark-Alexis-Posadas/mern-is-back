@@ -1,0 +1,10 @@
+# Ignore a specific file (e.g., your local API keys or secrets)
+.env
+
+# Ignore a specific folder and everything inside it (always add a trailing slash)
+node_modules/
+dist/
+
+# Ignore all files with a specific extension (using a wildcard *)
+*.log
+*.tmp
