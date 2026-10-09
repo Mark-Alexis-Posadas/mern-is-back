@@ -1,18 +1,56 @@
-import { Product, IProduct } from "../models/product.model";
+import { Types } from "mongoose";
+import { Product } from "../models/product.model";
 
 export class ProductService {
-  static async getAllProducts(): Promise<IProduct[]> {
-    return await Product.find({});
+  static async getAllProducts() {
+    return Product.find({
+      isActive: true,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
   }
 
-  static async getProductById(id: string): Promise<IProduct | null> {
-    return await Product.findById(id);
+  static async getProductById(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      return null;
+    }
+
+    return Product.findOne({
+      _id: id,
+      isActive: true,
+    }).lean();
   }
 
-  static async createProduct(
-    productData: Partial<IProduct>,
-  ): Promise<IProduct> {
+  static async createProduct(productData: Record<string, unknown>) {
     const product = new Product(productData);
-    return await product.save();
+    return product.save();
+  }
+
+  static async updateProduct(id: string, productData: Record<string, unknown>) {
+    if (!Types.ObjectId.isValid(id)) {
+      return null;
+    }
+
+    return Product.findByIdAndUpdate(
+      id,
+      { $set: productData },
+      {
+        new: true,
+        runValidators: true,
+      },
+    );
+  }
+
+  static async deleteProduct(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      return null;
+    }
+
+    // Soft delete: hide product from storefront
+    return Product.findByIdAndUpdate(
+      id,
+      { $set: { isActive: false } },
+      { new: true },
+    );
   }
 }

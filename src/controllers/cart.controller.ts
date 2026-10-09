@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { AuthRequest } from "../middleware/auth.middleware";
-import { CartService } from "../services/cart.service";
 
+import { CartService, CartValidationError } from "../services/cart.service";
 export class CartController {
   static async getCart(req: AuthRequest, res: Response): Promise<void> {
     try {
@@ -13,12 +13,10 @@ export class CartController {
       const cart = await CartService.getCartByUserId(req.user.id);
       res.json(cart || { user: req.user.id, items: [] });
     } catch (error) {
-      res
-        .status(500)
-        .json({
-          message: "Server error",
-          error: error instanceof Error ? error.message : error,
-        });
+      res.status(500).json({
+        message: "Server error",
+        error: error instanceof Error ? error.message : error,
+      });
     }
   }
 
@@ -36,12 +34,18 @@ export class CartController {
       );
       res.json(updatedCart);
     } catch (error) {
-      res
-        .status(400)
-        .json({
-          message: "Failed to update cart",
-          error: error instanceof Error ? error.message : error,
+      if (error instanceof CartValidationError) {
+        res.status(400).json({
+          message: error.message,
         });
+        return;
+      }
+
+      console.error("Cart update failed:", error);
+
+      res.status(500).json({
+        message: "Failed to update cart.",
+      });
     }
   }
 }
