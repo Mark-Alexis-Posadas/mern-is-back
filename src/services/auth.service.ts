@@ -67,4 +67,14 @@ export class AuthService {
 
     return { user: userObj, token };
   }
+
+  static async getCurrentUser(userId: string) {
+    const user = await User.findById(userId).select("-password").lean();
+
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    return user;
+  }
 }
