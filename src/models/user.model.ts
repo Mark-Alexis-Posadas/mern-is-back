@@ -20,6 +20,7 @@ const userSchema = new Schema<IUser>(
       index: true,
     },
     password: { type: String, required: true },
+
     isAdmin: { type: Boolean, required: true, default: false },
   },
   { timestamps: true },

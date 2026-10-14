@@ -1,34 +1,49 @@
-import { Schema, Document, model, Types } from "mongoose";
+import {
+  Schema,
+  model,
+  type HydratedDocument,
+  type InferSchemaType,
+} from "mongoose";
 
-export interface ICartItem {
-  product: Types.ObjectId;
-  quantity: number;
-}
+const cartItemSchema = new Schema(
+  {
+    product: {
+      type: Schema.Types.ObjectId,
+      ref: "Product",
+      required: true,
+    },
 
-export interface ICart extends Document {
-  user: Types.ObjectId;
-  items: ICartItem[];
-  createdAt: Date;
-  updatedAt: Date;
-}
+    quantity: {
+      type: Number,
+      required: true,
+      min: 1,
+      validate: {
+        validator: Number.isInteger,
+        message: "Quantity must be a whole number.",
+      },
+    },
+  },
+  { _id: false },
+);
 
-const cartItemSchema = new Schema<ICartItem>({
-  product: { type: Schema.Types.ObjectId, ref: "Product", required: true },
-  quantity: { type: Number, required: true, min: 1, default: 1 },
-});
-
-const cartSchema = new Schema<ICart>(
+const cartSchema = new Schema(
   {
     user: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
       unique: true,
-      index: true,
     },
-    items: [cartItemSchema],
+
+    items: {
+      type: [cartItemSchema],
+      default: [],
+    },
   },
   { timestamps: true },
 );
+
+export type ICart = InferSchemaType<typeof cartSchema>;
+export type CartDocument = HydratedDocument<ICart>;
 
 export const Cart = model<ICart>("Cart", cartSchema);

@@ -5,7 +5,7 @@ import productRoutes from "./routes/product.routes";
 import authRoutes from "./routes/auth.routes";
 import cartRoutes from "./routes/cart.routes";
 import orderRoutes from "./routes/order.routes";
-
+import adminOrderRoutes from "./routes/adminOrder.routes";
 dotenv.config();
 
 const app: Application = express();
@@ -17,6 +17,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/admin", adminOrderRoutes);
 // Base Route
 app.get("/", (req: Request, res: Response) => {
   res.json({ message: "Welcome to the E-Commerce API!" });

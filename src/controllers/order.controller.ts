@@ -1,6 +1,6 @@
-import { Response } from "express";
-import { AuthRequest } from "../middleware/auth.middleware";
-import { OrderService } from "../services/order.service";
+import type { Response } from "express";
+import type { AuthRequest } from "../types/auth.types";
+import { OrderService, OrderValidationError } from "../services/order.service";
 
 export class OrderController {
   static async createOrder(req: AuthRequest, res: Response): Promise<void> {
@@ -10,33 +10,25 @@ export class OrderController {
         return;
       }
 
-      const newOrder = await OrderService.createOrder(req.user.id, req.body);
-      res.status(201).json(newOrder);
-    } catch (error) {
-      res
-        .status(400)
-        .json({
-          message:
-            error instanceof Error ? error.message : "Failed to create order",
-        });
-    }
-  }
+      const order = await OrderService.createOrder(req.user.id, req.body);
 
-  static async getOrderById(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const order = await OrderService.getOrderById(req.params.id);
-      if (!order) {
-        res.status(404).json({ message: "Order not found" });
+      res.status(201).json(order);
+    } catch (error) {
+      if (error instanceof OrderValidationError) {
+        res.status(400).json({
+          message: error.message,
+        });
         return;
       }
-      res.json(order);
-    } catch (error) {
-      res
-        .status(500)
-        .json({
-          message: "Server error",
-          error: error instanceof Error ? error.message : error,
-        });
+
+      console.error("Create order failed:", error);
+
+      res.status(500).json({
+        message: "Failed to place order.",
+        ...(process.env.NODE_ENV !== "production" && {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      });
     }
   }
 
@@ -46,16 +38,45 @@ export class OrderController {
         res.status(401).json({ message: "Unauthorized" });
         return;
       }
+      console.log("Authenticated user ID:", req.user?.id);
+      const orders = await OrderService.getMyOrders(req.user.id);
 
-      const orders = await OrderService.getOrdersByUserId(req.user.id);
       res.json(orders);
     } catch (error) {
-      res
-        .status(500)
-        .json({
-          message: "Server error",
-          error: error instanceof Error ? error.message : error,
+      console.error("Get orders failed:", error);
+
+      res.status(500).json({
+        message: "Failed to load orders.",
+      });
+    }
+  }
+
+  static async getOrderById(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ message: "Unauthorized" });
+        return;
+      }
+
+      const order = await OrderService.getOrderById(
+        req.user.id,
+        String(req.params.id),
+      );
+
+      if (!order) {
+        res.status(404).json({
+          message: "Order not found.",
         });
+        return;
+      }
+
+      res.json(order);
+    } catch (error) {
+      console.error("Get order failed:", error);
+
+      res.status(500).json({
+        message: "Failed to load order.",
+      });
     }
   }
 }

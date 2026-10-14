@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { AuthRequest } from "../middleware/auth.middleware";
+import type { AuthRequest } from "../middleware/auth.middleware";
 
 import { CartService, CartValidationError } from "../services/cart.service";
 export class CartController {
