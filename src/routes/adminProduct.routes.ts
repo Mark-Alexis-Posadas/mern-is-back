@@ -4,7 +4,7 @@ import { protect } from "../middleware/auth.middleware";
 import { requireAdmin } from "../middleware/admin.middleware";
 import { AdminInventoryController } from "../controllers/adminInventory.controller";
 import { AdminProductController } from "../controllers/adminProduct.controller";
-
+import { AdminInventoryHistoryController } from "../controllers/adminInventoryHistory.controller";
 const router = Router();
 
 router.use(protect);
@@ -20,4 +20,10 @@ router.patch("/:id", AdminProductController.updateProduct);
 
 router.patch("/:id/status", AdminProductController.updateProductStatus);
 router.patch("/:id/stock", AdminInventoryController.adjustStock);
+
+router.get(
+  "/inventory/movements",
+  AdminInventoryHistoryController.getMovements,
+);
+
 export default router;
