@@ -4,12 +4,12 @@ import { AdminInventoryHistoryService } from "../services/adminInventoryHistory.
 export class AdminInventoryHistoryController {
   static async getMovements(req: Request, res: Response) {
     try {
-      const rawPage = req.query.page;
-      const rawLimit = req.query.limit;
-      const rawProductId = req.query.productId;
-
-      const page = rawPage === undefined ? 1 : Number(rawPage);
-      const limit = rawLimit === undefined ? 10 : Number(rawLimit);
+      const page = req.query.page === undefined ? 1 : Number(req.query.page);
+      const limit =
+        req.query.limit === undefined ? 10 : Number(req.query.limit);
+      const productId = req.query.productId;
+      const search = req.query.search;
+      const type = req.query.type ?? "all";
 
       if (
         !Number.isSafeInteger(page) ||
@@ -18,39 +18,50 @@ export class AdminInventoryHistoryController {
         limit < 1 ||
         limit > 100
       ) {
-        return res.status(400).json({
-          message: "Invalid pagination parameters.",
-        });
+        return res
+          .status(400)
+          .json({ message: "Invalid pagination parameters." });
       }
-
       if (
-        rawProductId !== undefined &&
-        (typeof rawProductId !== "string" || !rawProductId.trim())
+        productId !== undefined &&
+        (typeof productId !== "string" || !productId.trim())
       ) {
-        return res.status(400).json({
-          message: "Invalid product ID.",
-        });
+        return res.status(400).json({ message: "Invalid product ID." });
+      }
+      if (
+        search !== undefined &&
+        (typeof search !== "string" || search.length > 100)
+      ) {
+        return res.status(400).json({ message: "Invalid search query." });
+      }
+      if (type !== "all" && type !== "added" && type !== "removed") {
+        return res.status(400).json({ message: "Invalid movement type." });
       }
 
       const result = await AdminInventoryHistoryService.getMovements({
         page,
         limit,
-        productId: rawProductId as string | undefined,
+        productId: productId as string | undefined,
+        search: search as string | undefined,
+        type,
       });
-
       return res.status(200).json(result);
     } catch (error) {
-      if (error instanceof Error && error.message === "Invalid product ID.") {
-        return res.status(400).json({
-          message: error.message,
-        });
+      if (
+        error instanceof Error &&
+        [
+          "Invalid product ID.",
+          "Invalid movement type.",
+          "Invalid pagination parameters.",
+          "Search must be 100 characters or fewer.",
+        ].includes(error.message)
+      ) {
+        return res.status(400).json({ message: error.message });
       }
-
       console.error("Failed to fetch inventory movements:", error);
-
-      return res.status(500).json({
-        message: "Unable to fetch inventory history.",
-      });
+      return res
+        .status(500)
+        .json({ message: "Unable to fetch inventory history." });
     }
   }
 }
