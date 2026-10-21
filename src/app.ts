@@ -7,6 +7,7 @@ import cartRoutes from "./routes/cart.routes";
 import orderRoutes from "./routes/order.routes";
 import adminOrderRoutes from "./routes/adminOrder.routes";
 import adminCustomerRoutes from "./routes/adminCustomer.routes";
+import adminAnalyticsRoutes from "./routes/adminAnalytics.routes";
 import adminProductRoutes from "./routes/adminProduct.routes";
 import adminInventoryHistoryRoutes from "./routes/adminInventoryHistory.routes";
 
@@ -21,6 +22,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
+// Mount before the broad legacy admin-order router to apply this module's guard once.
+app.use("/api/admin/analytics", adminAnalyticsRoutes);
 app.use("/api/admin", adminOrderRoutes);
 app.use("/api/admin/customers", adminCustomerRoutes);
 app.use("/api/admin/products", adminProductRoutes);

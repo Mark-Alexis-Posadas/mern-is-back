@@ -106,5 +106,7 @@ const orderSchema = new Schema<IOrder>(
 );
 
 orderSchema.index({ user: 1, createdAt: -1 });
+// Analytics date-range scans across all customers.
+orderSchema.index({ createdAt: -1, _id: -1 });
 
 export const Order = model<IOrder>("Order", orderSchema);
