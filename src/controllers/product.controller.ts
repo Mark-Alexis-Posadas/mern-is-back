@@ -16,7 +16,12 @@ export class ProductController {
 
   static async getProductById(req: Request, res: Response): Promise<void> {
     try {
-      const product = await ProductService.getProductById(req.params.id);
+      const id = req.params.id;
+      if (typeof id !== "string") {
+        res.status(400).json({ message: "Invalid product ID." });
+        return;
+      }
+      const product = await ProductService.getProductById(id);
 
       if (!product) {
         res.status(404).json({
@@ -48,8 +53,13 @@ export class ProductController {
 
   static async updateProduct(req: Request, res: Response): Promise<void> {
     try {
+      const id = req.params.id;
+      if (typeof id !== "string") {
+        res.status(400).json({ message: "Invalid product ID." });
+        return;
+      }
       const product = await ProductService.updateProduct(
-        req.params.id,
+        id,
         req.body,
       );
 
@@ -74,7 +84,12 @@ export class ProductController {
 
   static async deleteProduct(req: Request, res: Response): Promise<void> {
     try {
-      const product = await ProductService.deleteProduct(req.params.id);
+      const id = req.params.id;
+      if (typeof id !== "string") {
+        res.status(400).json({ message: "Invalid product ID." });
+        return;
+      }
+      const product = await ProductService.deleteProduct(id);
 
       if (!product) {
         res.status(404).json({
