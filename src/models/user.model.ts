@@ -26,4 +26,7 @@ const userSchema = new Schema<IUser>(
   { timestamps: true },
 );
 
+// Customer directory filtering and deterministic newest-first pagination.
+userSchema.index({ isAdmin: 1, createdAt: -1, _id: -1 });
+
 export const User = model<IUser>("User", userSchema);
