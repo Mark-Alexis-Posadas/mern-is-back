@@ -1,6 +1,10 @@
 import type { Response } from "express";
 import type { AuthRequest } from "../types/auth.types";
 import { OrderService, OrderValidationError } from "../services/order.service";
+import {
+  CartConflictError,
+  CartValidationError,
+} from "../services/cart.service";
 
 export class OrderController {
   static async createOrder(req: AuthRequest, res: Response): Promise<void> {
@@ -14,7 +18,14 @@ export class OrderController {
 
       res.status(201).json(order);
     } catch (error) {
-      if (error instanceof OrderValidationError) {
+      if (error instanceof CartConflictError) {
+        res.status(409).json({ message: error.message });
+        return;
+      }
+      if (
+        error instanceof OrderValidationError ||
+        error instanceof CartValidationError
+      ) {
         res.status(400).json({
           message: error.message,
         });

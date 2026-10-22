@@ -9,6 +9,12 @@ import type {
 
 import { Cart } from "../models/cart.model";
 import { Product } from "../models/product.model";
+import {
+  cartRevision,
+  revisionFilter,
+  CartConflictError,
+  type CartRevision,
+} from "./cart.service";
 
 export class OrderValidationError extends Error {
   constructor(message: string) {
@@ -17,7 +23,7 @@ export class OrderValidationError extends Error {
   }
 }
 
-interface CreateOrderInput {
+interface CreateOrderInput extends CartRevision {
   shippingAddress: IShippingAddress;
   paymentMethod: "COD";
 }
@@ -68,6 +74,9 @@ export class OrderService {
       throw new OrderValidationError("Only Cash on Delivery is supported.");
     }
 
+    const revision = cartRevision(orderData);
+    if (!revision.cartId) throw new OrderValidationError("Your cart is empty.");
+
     const shippingAddress: IShippingAddress = {
       fullName: address.fullName.trim(),
       phone: address.phone.trim(),
@@ -84,9 +93,12 @@ export class OrderService {
       const order = await session.withTransaction(async () => {
         const cart = await Cart.findOne({
           user: userId,
+          _id: revision.cartId,
+          ...revisionFilter(revision.version),
         }).session(session);
 
-        if (!cart || cart.items.length === 0) {
+        if (!cart) throw new CartConflictError();
+        if (cart.items.length === 0) {
           throw new OrderValidationError("Your cart is empty.");
         }
 
@@ -102,7 +114,7 @@ export class OrderService {
 
           if (
             seenProducts.has(productId) ||
-            !Number.isInteger(quantity) ||
+            !Number.isSafeInteger(quantity) ||
             quantity < 1
           ) {
             throw new OrderValidationError("Your cart contains invalid items.");
@@ -182,19 +194,19 @@ export class OrderService {
           { session },
         );
 
-        // Delete only the cart version we read.
-        // This helps detect a concurrent cart edit.
-        const cartDeletion = await Cart.deleteOne(
+        // Keep cart identity and advance its revision so old tabs cannot
+        // resurrect checked-out items, even after transaction retries.
+        const cartClear = await Cart.updateOne(
           {
             _id: cart._id,
-            __v: cart.__v,
+            user: userId,
+            ...revisionFilter(revision.version),
           },
+          { $set: { items: [] }, $inc: { __v: 1 } },
           { session },
         );
 
-        if (cartDeletion.deletedCount !== 1) {
-          throw new Error("Cart changed during checkout. Please retry.");
-        }
+        if (cartClear.modifiedCount !== 1) throw new CartConflictError();
 
         return createdOrder;
       });
