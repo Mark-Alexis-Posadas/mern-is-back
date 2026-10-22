@@ -1,27 +1,39 @@
 import { Request, Response } from "express";
-import { AuthService } from "../services/auth.service";
+import { AuthService, AuthError } from "../services/auth.service";
 import type { AuthRequest } from "../middleware/auth.middleware";
+import {
+  AuthValidationError,
+  validateLogin,
+} from "../validators/auth.validation";
+
+function authFailure(error: unknown, res: Response): void {
+  if (error instanceof AuthValidationError) {
+    res.status(400).json({ message: error.message });
+  } else if (error instanceof AuthError) {
+    res.status(error.status).json({ message: error.message });
+  } else {
+    res
+      .status(500)
+      .json({ message: "Authentication unavailable. Please try again." });
+  }
+}
 export class AuthController {
   static async register(req: Request, res: Response): Promise<void> {
     try {
       const result = await AuthService.register(req.body);
       res.status(201).json(result);
     } catch (error) {
-      res.status(400).json({
-        message: error instanceof Error ? error.message : "Registration failed",
-      });
+      authFailure(error, res);
     }
   }
 
   static async login(req: Request, res: Response): Promise<void> {
     try {
-      const { email, password } = req.body;
+      const { email, password } = validateLogin(req.body);
       const result = await AuthService.login(email, password);
       res.json(result);
     } catch (error) {
-      res.status(401).json({
-        message: error instanceof Error ? error.message : "Login failed",
-      });
+      authFailure(error, res);
     }
   }
 

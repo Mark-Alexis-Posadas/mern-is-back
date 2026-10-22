@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import { protect } from "../middleware/auth.middleware";
-import { requireAdmin } from "../middleware/admin.middleware";
+import { requireAdmin } from "../middleware/requireAdmin";
 import { AdminInventoryController } from "../controllers/adminInventory.controller";
 import { AdminProductController } from "../controllers/adminProduct.controller";
 import { AdminInventoryHistoryController } from "../controllers/adminInventoryHistory.controller";

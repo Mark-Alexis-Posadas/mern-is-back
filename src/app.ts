@@ -17,12 +17,13 @@ const app: Application = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+// Auth applies throttling before its bounded JSON parser, including bad bodies.
 app.use("/api/auth", authRoutes);
+app.use(express.json());
 app.use("/api/products", productRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
-// Mount before the broad legacy admin-order router to apply this module's guard once.
+// Each admin router authorizes its own endpoints against the current database role.
 app.use("/api/admin/analytics", adminAnalyticsRoutes);
 app.use("/api/admin", adminOrderRoutes);
 app.use("/api/admin/customers", adminCustomerRoutes);

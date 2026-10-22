@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { protect } from "../middleware/auth.middleware";
-import { requireAdmin } from "../middleware/admin.middleware";
+import { requireAdmin } from "../middleware/requireAdmin";
 import { AdminInventoryHistoryController } from "../controllers/adminInventoryHistory.controller";
 
 const router = Router();

@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import { getJwtSecret } from "../utils/jwt";
+import { currentAccount } from "./currentAccount";
 
 export interface AuthRequest extends Request {
   user?: {
@@ -9,11 +10,11 @@ export interface AuthRequest extends Request {
   };
 }
 
-export const protect = (
+export const protect = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction,
-): void => {
+): Promise<void> => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {
@@ -25,33 +26,39 @@ export const protect = (
 
   const token = authHeader.slice(7).trim();
 
-  let decoded: JwtPayload;
+  let decoded: JwtPayload | string;
 
   try {
-    decoded = jwt.verify(token, getJwtSecret()) as JwtPayload;
-  } catch (error) {
-    console.error(
-      "JWT verification error:",
-      error instanceof Error ? error.message : error,
-    );
-
+    decoded = jwt.verify(token, getJwtSecret());
+  } catch {
     res.status(401).json({
       message: "Not authorized, token failed",
     });
     return;
   }
 
-  if (typeof decoded.id !== "string") {
+  if (
+    typeof decoded === "string" ||
+    typeof decoded.id !== "string" ||
+    !/^[a-fA-F0-9]{24}$/.test(decoded.id)
+  ) {
     res.status(401).json({
       message: "Invalid token payload",
     });
     return;
   }
 
-  req.user = {
-    id: decoded.id,
-    isAdmin: decoded.isAdmin === true,
-  };
-
-  next();
+  try {
+    const user = await currentAccount(req, decoded.id);
+    if (!user) {
+      res.status(401).json({ message: "Authentication required" });
+      return;
+    }
+    req.user = { id: decoded.id, isAdmin: user.isAdmin };
+    next();
+  } catch {
+    res
+      .status(500)
+      .json({ message: "Unable to authenticate. Please try again." });
+  }
 };

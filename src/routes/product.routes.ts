@@ -2,7 +2,7 @@ import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import { protect } from "../middleware/auth.middleware";
 
-import { requireAdmin } from "../middleware/admin.middleware";
+import { requireAdmin } from "../middleware/requireAdmin";
 
 const router = Router();
 

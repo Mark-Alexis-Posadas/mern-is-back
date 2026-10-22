@@ -4,6 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "format": "node ../scripts/format.mjs --write",
+    "format:check": "node ../scripts/format.mjs --check",
+    "format:staged:check": "node ../scripts/check-staged-format.mjs",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts"
   },
