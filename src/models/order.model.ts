@@ -25,6 +25,8 @@ export interface IOrder {
   shippingAddress: IShippingAddress;
   paymentMethod: "COD";
   paymentStatus: "unpaid" | "paid";
+  paidAt?: Date;
+  paymentCollectedBy?: Types.ObjectId;
   orderStatus: "pending" | "confirmed" | "shipped" | "delivered" | "cancelled";
   subtotal: number;
   shippingFee: number;
@@ -93,6 +95,13 @@ const orderSchema = new Schema<IOrder>(
       enum: ["unpaid", "paid"],
       default: "unpaid",
     },
+    // Payment audit is admin-only by default; legacy orders may omit both.
+    paidAt: { type: Date, select: false },
+    paymentCollectedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      select: false,
+    },
     orderStatus: {
       type: String,
       enum: ["pending", "confirmed", "shipped", "delivered", "cancelled"],
@@ -108,5 +117,10 @@ const orderSchema = new Schema<IOrder>(
 orderSchema.index({ user: 1, createdAt: -1 });
 // Analytics date-range scans across all customers.
 orderSchema.index({ createdAt: -1, _id: -1 });
+// Collection-date reporting is independent of the order creation date.
+orderSchema.index(
+  { paidAt: -1, _id: -1 },
+  { partialFilterExpression: { paidAt: { $exists: true } } },
+);
 
 export const Order = model<IOrder>("Order", orderSchema);

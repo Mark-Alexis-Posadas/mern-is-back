@@ -24,6 +24,7 @@ const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
 export class AdminOrderService {
   static async getAllOrders() {
     return Order.find()
+      .select("+paidAt +paymentCollectedBy")
       .populate("user", "name email")
       .sort({ createdAt: -1 })
       .lean();
@@ -34,7 +35,40 @@ export class AdminOrderService {
       return null;
     }
 
-    return Order.findById(id).populate("user", "name email").lean();
+    return Order.findById(id)
+      .select("+paidAt +paymentCollectedBy")
+      .populate("user", "name email")
+      .lean();
+  }
+
+  static async collectCodPayment(id: string, adminId: string) {
+    const order = await Order.findOneAndUpdate(
+      {
+        _id: id,
+        paymentMethod: "COD",
+        orderStatus: "delivered",
+        paymentStatus: "unpaid",
+        paidAt: null,
+        paymentCollectedBy: null,
+      },
+      {
+        $set: {
+          paymentStatus: "paid",
+          paymentCollectedBy: new mongoose.Types.ObjectId(adminId),
+        },
+        $currentDate: { paidAt: true },
+      },
+      { returnDocument: "after", runValidators: true },
+    )
+      .select("+paidAt +paymentCollectedBy")
+      .populate("user", "name email")
+      .lean();
+    if (order) return { result: "success" as const, order };
+    return {
+      result: (await Order.exists({ _id: id }))
+        ? ("conflict" as const)
+        : ("not_found" as const),
+    };
   }
 
   static async updateOrderStatus(id: string, newStatus: OrderStatus) {
@@ -50,6 +84,7 @@ export class AdminOrderService {
         | { result: "not_found" }
         | { result: "invalid_transition"; currentStatus: string }
         | { result: "inventory_error" }
+        | { result: "payment_conflict" }
         | undefined;
 
       await session.withTransaction(async () => {
@@ -61,6 +96,13 @@ export class AdminOrderService {
         }
 
         const currentStatus = order.orderStatus;
+
+        // Legacy paid orders may precede delivery. No refunds exist, so never
+        // cancel a paid order or restore its stock through fulfillment updates.
+        if (newStatus === "cancelled" && order.paymentStatus === "paid") {
+          outcome = { result: "payment_conflict" };
+          return;
+        }
 
         if (!ALLOWED_TRANSITIONS[currentStatus].includes(newStatus)) {
           outcome = {
@@ -97,6 +139,7 @@ export class AdminOrderService {
 
       if (outcome?.result === "success") {
         const updatedOrder = await Order.findById(id)
+          .select("+paidAt +paymentCollectedBy")
           .populate("user", "name email")
           .lean();
 

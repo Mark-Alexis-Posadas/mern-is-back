@@ -13,17 +13,19 @@ Admin UI: `/admin/analytics`. Existing dashboard and customer spending are uncha
 - **Dates:** `Order.createdAt`, not payment or delivery date. Asia/Manila calendar days, UTC+08:00, inclusive start/end dates translated to `[start, endExclusive)` UTC timestamps. Presets include today and the preceding N-1 days. Weeks start Monday; partial boundary weeks/months contain only orders within the selected range.
 - **Currency:** PHP, following the existing admin UI. There is no per-order currency configuration.
 
-Amounts are stored as JavaScript/MongoDB Numbers in the existing schema; report totals are rounded to two decimals. This is a current-status operational report, not a payment-date ledger or historical status snapshot. There is no refund/payment-event schema. Delivery does not mark payment as paid, and the current application has no payment-recording workflow. Existing unpaid data can therefore correctly yield zero paid revenue. Customer Management's spending metric includes unpaid orders and will differ.
+Amounts are stored as JavaScript/MongoDB Numbers in the existing schema; report totals are rounded to two decimals. The original summary/trend remains a current-status operational report by order creation date, not a historical status snapshot. Delivery never marks payment paid. Administrators can now explicitly confirm delivered COD collections; see [cod-collection.md](cod-collection.md). Customer Management's spending metric still includes unpaid orders and will differ.
+
+The additive `collections` section reports `totalRevenue`, `collectionCount`, and zero-filled `trend` rows (`date`, `revenue`, `collectionCount`) using **paidAt** within the same Asia/Manila date boundaries/grouping. It includes paid, non-cancelled COD orders with a recorded collection date, including shipping, irrespective of order creation date. Legacy paid orders without `paidAt` remain in original revenue metrics but are excluded from collection-date reporting; no dates are invented. New confirmations count each order once. The admin page shows this section separately even when no orders were created in the range. The two scans are operational reads, not a shared transactional report snapshot.
 
 ## API
 
 `GET /api/admin/analytics` with `Authorization: Bearer <admin-token>`.
 
-| Query | Allowed values | Default |
-| --- | --- | --- |
-| `range` | `7d`, `30d`, `90d`, `custom` | `30d` |
-| `interval` | `day`, `week`, `month` | `day` |
-| `startDate`, `endDate` | strict `YYYY-MM-DD`, required only with `custom` | none |
+| Query                  | Allowed values                                   | Default |
+| ---------------------- | ------------------------------------------------ | ------- |
+| `range`                | `7d`, `30d`, `90d`, `custom`                     | `30d`   |
+| `interval`             | `day`, `week`, `month`                           | `day`   |
+| `startDate`, `endDate` | strict `YYYY-MM-DD`, required only with `custom` | none    |
 
 Custom dates must be ordered, at most 366 inclusive days, and cannot end in the future. Explicit dates with a preset are rejected. Repeated/non-string filter inputs are rejected.
 
@@ -40,8 +42,10 @@ Illustrative response (one qualifying order; shortened arrays):
 ```json
 {
   "filters": {
-    "range": "custom", "interval": "day",
-    "startDate": "2026-10-01", "endDate": "2026-10-01",
+    "range": "custom",
+    "interval": "day",
+    "startDate": "2026-10-01",
+    "endDate": "2026-10-01",
     "start": "2026-09-30T16:00:00.000Z",
     "endExclusive": "2026-10-01T16:00:00.000Z",
     "timezone": "Asia/Manila"
@@ -49,13 +53,33 @@ Illustrative response (one qualifying order; shortened arrays):
   "currency": "PHP",
   "revenueBasis": "Explicitly paid, non-cancelled orders, grouped by order creation date. Includes shipping; product revenue excludes shipping.",
   "summary": {
-    "totalOrders": 1, "totalRevenue": 225, "salesCount": 1,
-    "unitsSold": 2, "averageOrderValue": 225, "paidOrderShare": 100
+    "totalOrders": 1,
+    "totalRevenue": 225,
+    "salesCount": 1,
+    "unitsSold": 2,
+    "averageOrderValue": 225,
+    "paidOrderShare": 100
   },
   "ordersByStatus": [{ "status": "pending", "count": 1 }],
   "trend": [{ "date": "2026-10-01", "revenue": 225, "salesCount": 1 }],
-  "topProducts": [{ "productId": "0123456789abcdef01234567", "name": "Historical product", "sku": "SKU-1", "quantitySold": 2, "revenue": 200 }],
-  "recentSales": [{ "_id": "abcdef0123456789abcdef01", "createdAt": "2026-09-30T16:00:00.000Z", "total": 225, "orderStatus": "pending", "quantity": 2 }]
+  "topProducts": [
+    {
+      "productId": "0123456789abcdef01234567",
+      "name": "Historical product",
+      "sku": "SKU-1",
+      "quantitySold": 2,
+      "revenue": 200
+    }
+  ],
+  "recentSales": [
+    {
+      "_id": "abcdef0123456789abcdef01",
+      "createdAt": "2026-09-30T16:00:00.000Z",
+      "total": 225,
+      "orderStatus": "pending",
+      "quantity": 2
+    }
+  ]
 }
 ```
 
@@ -65,7 +89,7 @@ HTTP errors: 400 invalid filters, 401 absent/invalid authentication, 403 non-adm
 
 ## Performance / deployment
 
-Requires MongoDB 5.0+ for `$dateTrunc`; integration tested with local MongoDB 7. One date-filtered `$facet` aggregation returns all sections, with a 15-second query limit. No N+1 queries. `Order` declares `{ createdAt: -1, _id: -1 }` for global date scans, separate from its existing customer-history index. Follow the deployment's usual index creation process; no migration or application-data write is performed by this module. Inspect `explain("executionStats")` on representative data before introducing summary collections or further indexes. Facet grouping/sorting remains proportional to orders/items in the bounded range.
+Requires MongoDB 5.0+ for `$dateTrunc`; integration tested with local MongoDB 7. Two independently date-filtered `$facet` aggregations run concurrently, each with a 15-second query limit: the original creation-date report and the additive collection-date report. No N+1 queries. `Order` declares `{ createdAt: -1, _id: -1 }` for global date scans, its existing customer-history index, and `{ paidAt: -1, _id: -1 }` with a partial filter for recorded collection dates. Follow the deployment's usual index creation process; no migration or application-data write is performed by this module. Inspect `explain("executionStats")` on representative data before introducing summary collections or further indexes. Facet grouping/sorting remains proportional to orders/items in the bounded range.
 
 ## Validation
 

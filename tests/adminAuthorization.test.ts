@@ -70,6 +70,11 @@ before(() => {
   mock.method(AdminOrderService, "getOrderById", result(fixture));
   mock.method(
     AdminOrderService,
+    "collectCodPayment",
+    result({ result: "success", order: fixture }),
+  );
+  mock.method(
+    AdminOrderService,
     "updateOrderStatus",
     result({ result: "success", order: fixture }),
   );
@@ -112,6 +117,7 @@ const endpoints: ReadonlyArray<readonly [string, string, number]> = [
   ["GET", "/api/admin/orders", 200],
   ["GET", `/api/admin/orders/${id}`, 200],
   ["PATCH", `/api/admin/orders/${id}/status`, 200],
+  ["POST", `/api/admin/orders/${id}/collect-cod`, 200],
   ["GET", "/api/admin/products", 200],
   ["GET", `/api/admin/products/${id}`, 200],
   ["POST", "/api/admin/products", 201],
@@ -146,12 +152,16 @@ async function request(method: string, path: string, bearer?: string) {
       ...(method === "GET"
         ? {}
         : {
-            body: JSON.stringify({
-              status: "confirmed",
-              isActive: true,
-              adjustment: 1,
-              reason: "Test adjustment",
-            }),
+            body: JSON.stringify(
+              path.endsWith("/collect-cod")
+                ? { confirmed: true }
+                : {
+                    status: "confirmed",
+                    isActive: true,
+                    adjustment: 1,
+                    reason: "Test adjustment",
+                  },
+            ),
           }),
     },
   );

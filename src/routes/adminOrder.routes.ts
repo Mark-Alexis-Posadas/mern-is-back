@@ -6,6 +6,7 @@ import {
   getAllAdminOrders,
   getAdminOrderById,
   updateAdminOrderStatus,
+  collectAdminCodPayment,
 } from "../controllers/adminOrder.controller";
 
 const router = Router();
@@ -14,6 +15,12 @@ const router = Router();
 // sibling admin modules do not perform a second authentication/role lookup.
 router.get("/orders", protect, requireAdmin, getAllAdminOrders);
 router.get("/orders/:id", protect, requireAdmin, getAdminOrderById);
+router.post(
+  "/orders/:id/collect-cod",
+  protect,
+  requireAdmin,
+  collectAdminCodPayment,
+);
 router.patch(
   "/orders/:id/status",
   protect,

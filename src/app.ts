@@ -10,6 +10,7 @@ import adminCustomerRoutes from "./routes/adminCustomer.routes";
 import adminAnalyticsRoutes from "./routes/adminAnalytics.routes";
 import adminProductRoutes from "./routes/adminProduct.routes";
 import adminInventoryHistoryRoutes from "./routes/adminInventoryHistory.routes";
+import { codCollectionErrors } from "./controllers/adminOrder.controller";
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ app.use("/api/admin", adminOrderRoutes);
 app.use("/api/admin/customers", adminCustomerRoutes);
 app.use("/api/admin/products", adminProductRoutes);
 app.use("/api/admin/inventory", adminInventoryHistoryRoutes);
+app.use("/api/admin/orders/:id/collect-cod", codCollectionErrors);
 // Base Route
 app.get("/", (req: Request, res: Response) => {
   res.json({ message: "Welcome to the E-Commerce API!" });
