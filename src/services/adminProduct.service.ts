@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { Product, type IProduct } from "../models/product.model";
+import { createProductWithInventory } from "./inventoryMovement.service";
 const EDITABLE_FIELDS = [
   "name",
   "slug",
@@ -32,7 +33,7 @@ export class AdminProductService {
     return Product.findById(id).lean();
   }
 
-  static async createProduct(data: Record<string, unknown>) {
+  static async createProduct(data: Record<string, unknown>, adminId: string) {
     const productData = this.pickEditableFields(data);
 
     const stock = data.stock ?? 0;
@@ -45,12 +46,13 @@ export class AdminProductService {
       throw new Error("Initial stock must be a non-negative integer");
     }
 
-    const product = new Product({
-      ...productData,
-      stock,
-    });
-
-    return product.save();
+    return createProductWithInventory(
+      {
+        ...productData,
+        stock,
+      },
+      adminId,
+    );
   }
 
   static async updateProduct(id: string, data: Record<string, unknown>) {

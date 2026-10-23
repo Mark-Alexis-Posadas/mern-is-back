@@ -10,6 +10,7 @@ import { Order, type IOrder } from "../src/models/order.model";
 import { Product } from "../src/models/product.model";
 import { User } from "../src/models/user.model";
 import { Cart } from "../src/models/cart.model";
+import { InventoryMovement } from "../src/models/inventoryMovement.model";
 import adminOrders from "../src/routes/adminOrder.routes";
 import { codCollectionErrors } from "../src/controllers/adminOrder.controller";
 import customerOrders from "../src/routes/order.routes";
@@ -46,6 +47,7 @@ before(
       User.createIndexes(),
       Product.createIndexes(),
       Cart.createIndexes(),
+      InventoryMovement.createIndexes(),
     ]);
     process.env.JWT_SECRET = secret;
     const app = express();
@@ -67,6 +69,7 @@ beforeEach(async () => {
     User.deleteMany({}),
     Product.deleteMany({}),
     Cart.deleteMany({}),
+    InventoryMovement.deleteMany({}),
   ]);
   const [admin, customer, product] = await Promise.all([
     User.create({

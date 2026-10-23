@@ -9,6 +9,7 @@ import type {
 
 import { Cart } from "../models/cart.model";
 import { Product } from "../models/product.model";
+import { recordInventoryMovement } from "./inventoryMovement.service";
 import {
   cartRevision,
   revisionFilter,
@@ -103,6 +104,7 @@ export class OrderService {
         }
 
         const orderItems: IOrderItem[] = [];
+        const orderId = new Types.ObjectId();
         const seenProducts = new Set<string>();
 
         let subtotal = 0;
@@ -137,7 +139,7 @@ export class OrderService {
           }
 
           // Atomic stock check and deduction.
-          const stockUpdate = await Product.updateOne(
+          const stockBefore = await Product.findOneAndUpdate(
             {
               _id: product._id,
               isActive: true,
@@ -146,14 +148,26 @@ export class OrderService {
             {
               $inc: { stock: -quantity },
             },
-            { session },
+            { session, returnDocument: "before" },
           );
 
-          if (stockUpdate.modifiedCount !== 1) {
+          if (!stockBefore) {
             throw new OrderValidationError(
               `Insufficient stock for ${product.name}.`,
             );
           }
+
+          await recordInventoryMovement(session, {
+            product: product._id,
+            type: "sale",
+            actorType: "customer",
+            actor: new Types.ObjectId(userId),
+            order: orderId,
+            adjustment: -quantity,
+            previousStock: stockBefore.stock,
+            newStock: stockBefore.stock - quantity,
+            reason: "Customer checkout",
+          });
 
           const imageUrl =
             product.images?.find((image) => image.isPrimary)?.url ??
@@ -181,6 +195,7 @@ export class OrderService {
           [
             {
               user: new Types.ObjectId(userId),
+              _id: orderId,
               items: orderItems,
               shippingAddress,
               paymentMethod: "COD",

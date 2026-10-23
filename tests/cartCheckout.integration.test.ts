@@ -10,6 +10,7 @@ import { Cart } from "../src/models/cart.model";
 import { Order } from "../src/models/order.model";
 import { Product } from "../src/models/product.model";
 import { User } from "../src/models/user.model";
+import { InventoryMovement } from "../src/models/inventoryMovement.model";
 import {
   CartService,
   CartConflictError,
@@ -45,6 +46,7 @@ before(
       Order.createIndexes(),
       Product.createIndexes(),
       User.createIndexes(),
+      InventoryMovement.createIndexes(),
     ]);
     process.env.JWT_SECRET = secret;
     const app = express();
@@ -65,6 +67,7 @@ beforeEach(async () => {
     Order.deleteMany({}),
     Product.deleteMany({}),
     User.deleteMany({}),
+    InventoryMovement.deleteMany({}),
   ]);
 });
 after(async () => {

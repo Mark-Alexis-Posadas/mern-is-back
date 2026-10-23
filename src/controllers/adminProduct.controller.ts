@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 
 import { AdminProductService } from "../services/adminProduct.service";
+import type { AuthRequest } from "../middleware/auth.middleware";
 
 export class AdminProductController {
   static async getAllProducts(
@@ -41,12 +42,19 @@ export class AdminProductController {
   }
 
   static async createProduct(
-    req: Request,
+    req: AuthRequest,
     res: Response,
     next: NextFunction,
   ): Promise<void> {
     try {
-      const product = await AdminProductService.createProduct(req.body);
+      if (!req.user) {
+        res.status(401).json({ message: "Authentication required" });
+        return;
+      }
+      const product = await AdminProductService.createProduct(
+        req.body,
+        req.user.id,
+      );
 
       res.status(201).json({
         message: "Product created successfully",

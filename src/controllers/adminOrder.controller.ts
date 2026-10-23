@@ -130,7 +130,7 @@ export const getAdminOrderById = async (
 };
 
 export const updateAdminOrderStatus = async (
-  req: Request,
+  req: AuthRequest,
   res: Response,
   next: NextFunction,
 ) => {
@@ -152,6 +152,7 @@ export const updateAdminOrderStatus = async (
     const result = await AdminOrderService.updateOrderStatus(
       id,
       status as OrderStatus,
+      req.user?.id,
     );
 
     if (result.result === "not_found") {

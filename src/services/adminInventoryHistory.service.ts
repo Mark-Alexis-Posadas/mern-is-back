@@ -2,12 +2,22 @@ import mongoose, { type QueryFilter } from "mongoose";
 import { InventoryMovement } from "../models/inventoryMovement.model";
 import { Product } from "../models/product.model";
 
-type MovementType = "all" | "added" | "removed";
+export type MovementType =
+  "all" | "added" | "removed" | "manual" | "sale" | "cancellation";
+export const MOVEMENT_FILTERS: readonly string[] = [
+  "all",
+  "added",
+  "removed",
+  "manual",
+  "sale",
+  "cancellation",
+];
 
 type GetMovementsParams = {
   page?: number;
   limit?: number;
   productId?: string;
+  orderId?: string;
   search?: string;
   type?: MovementType;
 };
@@ -17,6 +27,7 @@ export class AdminInventoryHistoryService {
     page = 1,
     limit = 10,
     productId,
+    orderId,
     search = "",
     type = "all",
   }: GetMovementsParams) {
@@ -32,9 +43,11 @@ export class AdminInventoryHistoryService {
     if (productId && !mongoose.isValidObjectId(productId)) {
       throw new Error("Invalid product ID.");
     }
-    if (!["all", "added", "removed"].includes(type)) {
+    if (!MOVEMENT_FILTERS.includes(type)) {
       throw new Error("Invalid movement type.");
     }
+    if (orderId && !mongoose.isValidObjectId(orderId))
+      throw new Error("Invalid order ID.");
     const query = search.trim();
     if (query.length > 100) {
       throw new Error("Search must be 100 characters or fewer.");
@@ -44,6 +57,10 @@ export class AdminInventoryHistoryService {
     if (productId) filter.product = new mongoose.Types.ObjectId(productId);
     if (type === "added") filter.adjustment = { $gt: 0 };
     if (type === "removed") filter.adjustment = { $lt: 0 };
+    if (type === "manual")
+      filter.$or = [{ type: "manual" }, { type: { $exists: false } }];
+    if (type === "sale" || type === "cancellation") filter.type = type;
+    if (orderId) filter.order = new mongoose.Types.ObjectId(orderId);
 
     if (query) {
       const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -69,6 +86,7 @@ export class AdminInventoryHistoryService {
       InventoryMovement.find(filter)
         .populate("product", "name sku images")
         .populate("admin", "name email")
+        .populate("actor", "name email")
         .sort({ createdAt: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -77,7 +95,13 @@ export class AdminInventoryHistoryService {
     ]);
 
     return {
-      movements,
+      movements: movements.map((movement) => ({
+        ...movement,
+        admin: movement.admin ?? null,
+        type: movement.type ?? "manual",
+        actorType: movement.actorType ?? "admin",
+        actor: movement.actor ?? movement.admin ?? null,
+      })),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }

@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 
 import { Product } from "../models/product.model";
-import { InventoryMovement } from "../models/inventoryMovement.model";
+import { recordInventoryMovement } from "./inventoryMovement.service";
 
 type StockAdjustmentResult =
   | { result: "success"; newStock: number }
@@ -71,19 +71,16 @@ export class AdminInventoryService {
             throw new Error("STOCK_UPDATE_CONFLICT");
           }
 
-          await InventoryMovement.create(
-            [
-              {
-                product: product._id,
-                admin: new mongoose.Types.ObjectId(adminId),
-                adjustment,
-                previousStock,
-                newStock,
-                reason: cleanReason,
-              },
-            ],
-            { session },
-          );
+          await recordInventoryMovement(session, {
+            product: product._id,
+            actor: new mongoose.Types.ObjectId(adminId),
+            actorType: "admin",
+            type: "manual",
+            adjustment,
+            previousStock,
+            newStock,
+            reason: cleanReason,
+          });
 
           return {
             result: "success",

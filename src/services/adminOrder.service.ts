@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 import { Order } from "../models/order.model";
 import { Product } from "../models/product.model";
+import { recordInventoryMovement } from "./inventoryMovement.service";
 
 export const ORDER_STATUSES = [
   "pending",
@@ -71,7 +72,11 @@ export class AdminOrderService {
     };
   }
 
-  static async updateOrderStatus(id: string, newStatus: OrderStatus) {
+  static async updateOrderStatus(
+    id: string,
+    newStatus: OrderStatus,
+    adminId?: string,
+  ) {
     if (!mongoose.isValidObjectId(id)) {
       return { result: "not_found" as const };
     }
@@ -113,18 +118,53 @@ export class AdminOrderService {
         }
 
         if (newStatus === "cancelled") {
+          const restorations = new Map<
+            string,
+            { product: mongoose.Types.ObjectId; quantity: number }
+          >();
           for (const item of order.items) {
-            // Assumes Product schema uses a numeric "stock" field.
-            const result = await Product.updateOne(
-              { _id: item.product },
+            if (!Number.isSafeInteger(item.quantity) || item.quantity < 1) {
+              throw new Error("INVENTORY_RESTORE_FAILED");
+            }
+            const key = String(item.product);
+            const quantity =
+              (restorations.get(key)?.quantity ?? 0) + item.quantity;
+            if (!Number.isSafeInteger(quantity))
+              throw new Error("INVENTORY_RESTORE_FAILED");
+            restorations.set(key, { product: item.product, quantity });
+          }
+          // Legacy orders may contain repeated product lines. Restore their sum
+          // once, retaining one auditable before/after pair per order/product.
+          for (const item of restorations.values()) {
+            const before = await Product.findOneAndUpdate(
+              {
+                _id: item.product,
+                stock: {
+                  $gte: 0,
+                  $lte: Number.MAX_SAFE_INTEGER - item.quantity,
+                },
+              },
               { $inc: { stock: item.quantity } },
-              { session },
+              { session, returnDocument: "before" },
             );
 
-            if (result.matchedCount !== 1) {
+            if (!before) {
               outcome = { result: "inventory_error" };
               throw new Error("INVENTORY_RESTORE_FAILED");
             }
+            await recordInventoryMovement(session, {
+              product: item.product,
+              type: "cancellation",
+              actorType: adminId ? "admin" : "system",
+              ...(adminId
+                ? { actor: new mongoose.Types.ObjectId(adminId) }
+                : {}),
+              order: order._id,
+              adjustment: item.quantity,
+              previousStock: before.stock,
+              newStock: before.stock + item.quantity,
+              reason: "Order cancellation stock restoration",
+            });
           }
         }
 

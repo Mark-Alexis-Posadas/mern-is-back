@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { ProductService } from "../services/product.service";
+import type { AuthRequest } from "../middleware/auth.middleware";
 
 export class ProductController {
   static async getProducts(req: Request, res: Response): Promise<void> {
@@ -38,9 +39,13 @@ export class ProductController {
     }
   }
 
-  static async createProduct(req: Request, res: Response): Promise<void> {
+  static async createProduct(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const product = await ProductService.createProduct(req.body);
+      if (!req.user) {
+        res.status(401).json({ message: "Authentication required" });
+        return;
+      }
+      const product = await ProductService.createProduct(req.body, req.user.id);
 
       res.status(201).json(product);
     } catch (error) {
@@ -51,8 +56,12 @@ export class ProductController {
     }
   }
 
-  static async updateProduct(req: Request, res: Response): Promise<void> {
+  static async updateProduct(req: AuthRequest, res: Response): Promise<void> {
     try {
+      if (!req.user) {
+        res.status(401).json({ message: "Authentication required" });
+        return;
+      }
       const id = req.params.id;
       if (typeof id !== "string") {
         res.status(400).json({ message: "Invalid product ID." });
@@ -61,6 +70,7 @@ export class ProductController {
       const product = await ProductService.updateProduct(
         id,
         req.body,
+        req.user.id,
       );
 
       if (!product) {
