@@ -114,7 +114,8 @@ const orderSchema = new Schema<IOrder>(
   { timestamps: true },
 );
 
-orderSchema.index({ user: 1, createdAt: -1 });
+// Reverse scans support oldest-first as well as newest-first customer history.
+orderSchema.index({ user: 1, createdAt: -1, _id: -1 });
 // Analytics date-range scans across all customers.
 orderSchema.index({ createdAt: -1, _id: -1 });
 // Collection-date reporting is independent of the order creation date.

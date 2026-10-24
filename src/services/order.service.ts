@@ -1,3 +1,7 @@
+import {
+  parseCustomerOrderQuery,
+  type CustomerOrderQuery,
+} from "./customerOrderList.query";
 import { restoreCancelledOrderStock } from "./orderCancellation.service";
 import mongoose, { Types } from "mongoose";
 
@@ -267,14 +271,37 @@ export class OrderService {
     }
   }
 
-  static async getMyOrders(userId: string): Promise<IOrder[]> {
-    if (!Types.ObjectId.isValid(userId)) {
+  static async getMyOrders(
+    userId: string,
+    query: CustomerOrderQuery = parseCustomerOrderQuery({}),
+  ) {
+    if (!Types.ObjectId.isValid(userId))
       throw new OrderValidationError("Invalid user.");
-    }
-
-    return Order.find({
+    const filter = {
       user: userId,
-    }).sort({ createdAt: -1 });
+      ...(query.orderStatus ? { orderStatus: query.orderStatus } : {}),
+      ...(query.paymentStatus ? { paymentStatus: query.paymentStatus } : {}),
+    };
+    const direction = query.sort === "oldest" ? 1 : -1;
+    const [items, total] = await Promise.all([
+      Order.find(filter)
+        .select(
+          "user items shippingAddress paymentMethod paymentStatus orderStatus subtotal shippingFee total createdAt updatedAt",
+        )
+        .sort({ createdAt: direction, _id: direction })
+        .skip((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .maxTimeMS(3000)
+        .lean(),
+      Order.countDocuments(filter).maxTimeMS(3000),
+    ]);
+    return {
+      items,
+      total,
+      page: query.page,
+      limit: query.limit,
+      totalPages: Math.ceil(total / query.limit),
+    };
   }
 
   static async getOrderById(

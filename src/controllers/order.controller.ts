@@ -1,3 +1,7 @@
+import {
+  parseCustomerOrderQuery,
+  CustomerOrderQueryError,
+} from "../services/customerOrderList.query";
 import type { Response } from "express";
 import type { AuthRequest } from "../types/auth.types";
 import { OrderService, OrderValidationError } from "../services/order.service";
@@ -94,12 +98,18 @@ export class OrderController {
         res.status(401).json({ message: "Unauthorized" });
         return;
       }
-      console.log("Authenticated user ID:", req.user?.id);
-      const orders = await OrderService.getMyOrders(req.user.id);
+      res.setHeader("Cache-Control", "no-store");
+      const orders = await OrderService.getMyOrders(
+        req.user.id,
+        parseCustomerOrderQuery(req.query),
+      );
 
       res.json(orders);
     } catch (error) {
-      console.error("Get orders failed:", error);
+      if (error instanceof CustomerOrderQueryError) {
+        res.status(400).json({ message: error.message });
+        return;
+      }
 
       res.status(500).json({
         message: "Failed to load orders.",
