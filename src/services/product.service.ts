@@ -1,3 +1,8 @@
+import {
+  parseProductQuery,
+  escapeProductSearch,
+  type ProductListQuery,
+} from "./productList.query";
 import mongoose, { Types } from "mongoose";
 import { Product } from "../models/product.model";
 import {
@@ -6,12 +11,44 @@ import {
 } from "./inventoryMovement.service";
 
 export class ProductService {
-  static async getAllProducts() {
-    return Product.find({
-      isActive: true,
-    })
-      .sort({ createdAt: -1 })
-      .lean();
+  static async getAllProducts(query: ProductListQuery = parseProductQuery({})) {
+    const filter: Record<string, unknown> = { isActive: true };
+    if (query.category) filter.category = query.category;
+    if (query.search) {
+      const literal = {
+        $regex: escapeProductSearch(query.search),
+        $options: "i",
+      };
+      filter.$or = [{ name: literal }, { sku: literal }, { brand: literal }];
+    }
+    if (query.minPrice !== undefined || query.maxPrice !== undefined)
+      filter.price = {
+        ...(query.minPrice !== undefined ? { $gte: query.minPrice } : {}),
+        ...(query.maxPrice !== undefined ? { $lte: query.maxPrice } : {}),
+      };
+    const sorts: Record<ProductListQuery["sort"], Record<string, 1 | -1>> = {
+      newest: { createdAt: -1, _id: -1 },
+      priceAsc: { price: 1, _id: 1 },
+      priceDesc: { price: -1, _id: -1 },
+      nameAsc: { name: 1, _id: 1 },
+      nameDesc: { name: -1, _id: -1 },
+    };
+    const [items, total] = await Promise.all([
+      Product.find(filter)
+        .sort(sorts[query.sort])
+        .skip((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .maxTimeMS(3000)
+        .lean(),
+      Product.countDocuments(filter).maxTimeMS(3000),
+    ]);
+    return {
+      items,
+      total,
+      page: query.page,
+      limit: query.limit,
+      totalPages: Math.ceil(total / query.limit),
+    };
   }
 
   static async getProductById(id: string) {

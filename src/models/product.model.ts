@@ -156,6 +156,7 @@ productSchema.index({
   isActive: 1,
   category: 1,
   createdAt: -1,
+  _id: -1,
 });
 
 productSchema.index({
@@ -163,6 +164,11 @@ productSchema.index({
   isFeatured: 1,
   createdAt: -1,
 });
+
+// Public listing sort indexes; reverse scans also support descending price/name.
+productSchema.index({ isActive: 1, createdAt: -1, _id: -1 });
+productSchema.index({ isActive: 1, price: 1, _id: 1 });
+productSchema.index({ isActive: 1, name: 1, _id: 1 });
 
 // Basic product search
 productSchema.index({

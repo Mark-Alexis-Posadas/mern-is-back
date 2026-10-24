@@ -1,3 +1,7 @@
+import {
+  parseProductQuery,
+  ProductQueryError,
+} from "../services/productList.query";
 import type { Request, Response } from "express";
 import { ProductService } from "../services/product.service";
 import type { AuthRequest } from "../middleware/auth.middleware";
@@ -5,10 +9,16 @@ import type { AuthRequest } from "../middleware/auth.middleware";
 export class ProductController {
   static async getProducts(req: Request, res: Response): Promise<void> {
     try {
-      const products = await ProductService.getAllProducts();
+      const products = await ProductService.getAllProducts(
+        parseProductQuery(req.query),
+      );
 
       res.status(200).json(products);
-    } catch {
+    } catch (error) {
+      if (error instanceof ProductQueryError) {
+        res.status(400).json({ message: error.message });
+        return;
+      }
       res.status(500).json({
         message: "Failed to fetch products",
       });
