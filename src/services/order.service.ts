@@ -1,3 +1,4 @@
+import { restoreCancelledOrderStock } from "./orderCancellation.service";
 import mongoose, { Types } from "mongoose";
 
 import { Order } from "../models/order.model";
@@ -30,6 +31,36 @@ interface CreateOrderInput extends CartRevision {
 }
 
 export class OrderService {
+  static async cancelOwnOrder(userId: string, orderId: string) {
+    if (!/^[a-fA-F0-9]{24}$/.test(orderId))
+      return { result: "not_found" as const };
+    const session = await mongoose.startSession();
+    try {
+      return await session.withTransaction(async () => {
+        const order = await Order.findOne({
+          _id: orderId,
+          user: userId,
+        }).session(session);
+        if (!order) return { result: "not_found" as const };
+        if (
+          order.paymentMethod !== "COD" ||
+          order.paymentStatus !== "unpaid" ||
+          !["pending", "confirmed"].includes(order.orderStatus)
+        )
+          return { result: "conflict" as const };
+        await restoreCancelledOrderStock(order, session, {
+          type: "customer",
+          id: userId,
+        });
+        order.orderStatus = "cancelled";
+        await order.save({ session });
+        return { result: "success" as const, order };
+      });
+    } finally {
+      await session.endSession();
+    }
+  }
+
   static async createOrder(
     userId: string,
     orderData: CreateOrderInput,

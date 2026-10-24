@@ -1,3 +1,4 @@
+import customerOrderRoutes from "../src/routes/order.routes";
 import assert from "node:assert/strict";
 import { after, before, beforeEach, mock, test } from "node:test";
 import type { AddressInfo } from "node:net";
@@ -55,6 +56,7 @@ before(
     process.env.JWT_SECRET = secret;
     const app = express();
     app.use(express.json());
+    app.use("/api/orders", customerOrderRoutes);
     app.use("/api/admin/inventory", historyRoutes);
     app.use("/api/admin", adminOrderRoutes);
     app.use("/api/admin/products", adminProductRoutes);
@@ -885,4 +887,286 @@ test("initial stock and legacy absolute stock edits are audited without changing
     "Created fixture",
   );
   assert.equal(await InventoryMovement.countDocuments(), 3);
+});
+
+for (const status of ["pending", "confirmed"] as const) {
+  test(`owner cancels unpaid ${status} COD with customer audit and unchanged payment`, async () => {
+    const order = await place();
+    const id = String((order as { _id?: unknown })._id);
+    await Order.updateOne({ _id: id }, { $set: { orderStatus: status } });
+    const response = await request(
+      `/api/orders/${id}/cancel`,
+      customerId,
+      "POST",
+      { confirmed: true },
+    );
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.orderStatus, "cancelled");
+    assert.equal(payload.paymentStatus, "unpaid");
+    assert.equal(payload.paymentMethod, "COD");
+    assert.equal(payload.paidAt, undefined);
+    assert.equal(payload.paymentCollectedBy, undefined);
+    assert.equal((await Product.findById(productId))!.stock, 10);
+    const movement = await InventoryMovement.findOne({
+      order: id,
+      type: "cancellation",
+    }).lean();
+    assert.equal(movement!.actorType, "customer");
+    assert.equal(String(movement!.actor), customerId);
+    assert.equal(movement!.admin, undefined);
+    assert.equal(movement!.previousStock, 8);
+    assert.equal(movement!.newStock, 10);
+    assert.equal(movement!.adjustment, 2);
+    assert.equal(
+      (
+        await request(`/api/orders/${id}/cancel`, customerId, "POST", {
+          confirmed: true,
+        })
+      ).status,
+      409,
+    );
+    assert.equal(
+      await InventoryMovement.countDocuments({
+        order: id,
+        type: "cancellation",
+      }),
+      1,
+    );
+    assert.equal((await Cart.findOne({ user: customerId }))!.items.length, 0);
+  });
+}
+
+test("customer cancellation denies anonymous, other owners, invalid inputs, fulfilled and paid orders", async () => {
+  const order = await place();
+  const id = String((order as { _id?: unknown })._id);
+  const path = `/api/orders/${id}/cancel`;
+  assert.equal(
+    (
+      await fetch(base + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmed: true }),
+      })
+    ).status,
+    401,
+  );
+  assert.equal(
+    (await request(path, adminId, "POST", { confirmed: true })).status,
+    404,
+  );
+  assert.equal(
+    (await request(path, customerId, "POST", { confirmed: false })).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request("/api/orders/invalid/cancel", customerId, "POST", {
+        confirmed: true,
+      })
+    ).status,
+    404,
+  );
+  for (const status of ["shipped", "delivered", "cancelled"] as const) {
+    await Order.updateOne({ _id: id }, { $set: { orderStatus: status } });
+    assert.equal(
+      (await request(path, customerId, "POST", { confirmed: true })).status,
+      409,
+    );
+  }
+  await Order.updateOne(
+    { _id: id },
+    {
+      $set: {
+        orderStatus: "pending",
+        paymentStatus: "paid",
+        paidAt: new Date(),
+        paymentCollectedBy: adminId,
+      },
+    },
+  );
+  assert.equal(
+    (await request(path, customerId, "POST", { confirmed: true })).status,
+    409,
+  );
+  assert.equal(
+    await InventoryMovement.countDocuments({ type: "cancellation" }),
+    0,
+  );
+  assert.equal((await Product.findById(productId))!.stock, 8);
+});
+
+test("customer movement write failure rolls back stock and order", async () => {
+  const order = await place();
+  const id = String((order as { _id?: unknown })._id);
+  const stub = mock.method(InventoryMovement, "create", () => {
+    throw new Error("fixture audit failure");
+  });
+  try {
+    assert.equal(
+      (
+        await request(`/api/orders/${id}/cancel`, customerId, "POST", {
+          confirmed: true,
+        })
+      ).status,
+      500,
+    );
+  } finally {
+    stub.mock.restore();
+  }
+  assert.equal((await Order.findById(id))!.orderStatus, "pending");
+  assert.equal((await Product.findById(productId))!.stock, 8);
+  assert.equal(
+    await InventoryMovement.countDocuments({ type: "cancellation" }),
+    0,
+  );
+});
+
+test(
+  "overlapping customer cancellations restore stock once",
+  { timeout: 15000 },
+  async () => {
+    const order = await place();
+    const id = String((order as { _id?: unknown })._id);
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let arrivals = 0;
+    const original = Order.findOne.bind(Order);
+    const stub = mock.method(
+      Order,
+      "findOne",
+      (...args: Parameters<typeof Order.findOne>) => {
+        const query = original(...args);
+        const exec = query.exec.bind(query);
+        query.exec = async () => {
+          const result = await exec();
+          if (++arrivals <= 2) {
+            if (arrivals === 2) release();
+            await barrier;
+          }
+          return result;
+        };
+        return query;
+      },
+    );
+    try {
+      const results = await Promise.all([
+        OrderService.cancelOwnOrder(customerId, id),
+        OrderService.cancelOwnOrder(customerId, id),
+      ]);
+      assert.deepEqual(results.map((r) => r!.result).sort(), [
+        "conflict",
+        "success",
+      ]);
+    } finally {
+      release();
+      stub.mock.restore();
+    }
+    assert.equal((await Product.findById(productId))!.stock, 10);
+    assert.equal(
+      await InventoryMovement.countDocuments({ type: "cancellation" }),
+      1,
+    );
+  },
+);
+
+test(
+  "admin shipment wins against a paused customer cancellation snapshot",
+  { timeout: 15000 },
+  async () => {
+    const order = await place();
+    const id = String((order as { _id?: unknown })._id);
+    await Order.updateOne({ _id: id }, { $set: { orderStatus: "confirmed" } });
+    let ready!: () => void;
+    const read = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    let release!: () => void;
+    const barrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = Order.findOne.bind(Order);
+    let calls = 0;
+    const stub = mock.method(
+      Order,
+      "findOne",
+      (...args: Parameters<typeof Order.findOne>) => {
+        const query = original(...args);
+        const exec = query.exec.bind(query);
+        query.exec = async () => {
+          const result = await exec();
+          if (++calls === 1) {
+            ready();
+            await barrier;
+          }
+          return result;
+        };
+        return query;
+      },
+    );
+    const cancellation = OrderService.cancelOwnOrder(customerId, id);
+    try {
+      await read;
+      assert.equal(
+        (await AdminOrderService.updateOrderStatus(id, "shipped", adminId))
+          .result,
+        "success",
+      );
+      release();
+      assert.equal((await cancellation)!.result, "conflict");
+    } finally {
+      release();
+      await cancellation;
+      stub.mock.restore();
+    }
+    assert.equal((await Product.findById(productId))!.stock, 8);
+    assert.equal(
+      await InventoryMovement.countDocuments({ type: "cancellation" }),
+      0,
+    );
+  },
+);
+
+test("customer cancellation missing-product failure restores no partial stock", async () => {
+  const second = await secondProduct();
+  const order = await place([
+    { product: productId, quantity: 2 },
+    { product: String(second._id), quantity: 1 },
+  ]);
+  const id = String((order as { _id?: unknown })._id);
+  await Product.deleteOne({ _id: second._id });
+  assert.equal(
+    (
+      await request(`/api/orders/${id}/cancel`, customerId, "POST", {
+        confirmed: true,
+      })
+    ).status,
+    500,
+  );
+  assert.equal((await Product.findById(productId))!.stock, 8);
+  assert.equal((await Order.findById(id))!.orderStatus, "pending");
+  assert.equal(
+    await InventoryMovement.countDocuments({ type: "cancellation" }),
+    0,
+  );
+});
+
+test("overlapping delivered customer cancellation and COD collection never restore paid stock", async () => {
+  const order = await place();
+  const id = String((order as { _id?: unknown })._id);
+  await Order.updateOne({ _id: id }, { $set: { orderStatus: "delivered" } });
+  const [cancel, collect] = await Promise.all([
+    OrderService.cancelOwnOrder(customerId, id),
+    AdminOrderService.collectCodPayment(id, adminId),
+  ]);
+  assert.equal(cancel!.result, "conflict");
+  assert.equal(collect.result, "success");
+  assert.equal((await Order.findById(id))!.paymentStatus, "paid");
+  assert.equal((await Product.findById(productId))!.stock, 8);
+  assert.equal(
+    await InventoryMovement.countDocuments({ type: "cancellation" }),
+    0,
+  );
 });

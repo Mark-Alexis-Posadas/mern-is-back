@@ -7,6 +7,51 @@ import {
 } from "../services/cart.service";
 
 export class OrderController {
+  static async cancelOwnOrder(req: AuthRequest, res: Response): Promise<void> {
+    res.setHeader("Cache-Control", "no-store");
+    if (!req.user) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    const body: unknown = req.body;
+    if (
+      !body ||
+      typeof body !== "object" ||
+      Array.isArray(body) ||
+      Object.keys(body).length !== 1 ||
+      !("confirmed" in body) ||
+      body.confirmed !== true
+    ) {
+      res
+        .status(400)
+        .json({ message: "Explicit cancellation confirmation is required." });
+      return;
+    }
+    try {
+      const result = await OrderService.cancelOwnOrder(
+        req.user.id,
+        String(req.params.id),
+      );
+      if (result?.result === "not_found") {
+        res.status(404).json({ message: "Order not found." });
+        return;
+      }
+      if (result?.result !== "success") {
+        res.status(409).json({
+          message:
+            "This order can no longer be cancelled. Refresh its current status.",
+        });
+        return;
+      }
+      res.json(result.order);
+    } catch {
+      res.status(500).json({
+        message:
+          "Unable to cancel order. Refresh its status before trying again.",
+      });
+    }
+  }
+
   static async createOrder(req: AuthRequest, res: Response): Promise<void> {
     try {
       if (!req.user) {
