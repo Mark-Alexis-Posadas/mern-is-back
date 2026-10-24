@@ -8,6 +8,7 @@ router.use(protect);
 
 router.post("/", OrderController.createOrder);
 router.post("/:id/cancel", OrderController.cancelOwnOrder);
+router.get("/checkout-attempts/:key", OrderController.getCheckoutAttempt);
 router.get("/my", OrderController.getMyOrders);
 router.get("/:id", OrderController.getOrderById);
 

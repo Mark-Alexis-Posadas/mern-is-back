@@ -1,3 +1,11 @@
+import { CheckoutAttempt } from "../models/checkoutAttempt.model";
+import {
+  checkoutKey,
+  checkoutFingerprint,
+  committedCheckout,
+  CheckoutKeyConflictError,
+  CheckoutRetryableError,
+} from "./checkoutAttempt.service";
 import {
   parseCustomerOrderQuery,
   type CustomerOrderQuery,
@@ -30,6 +38,7 @@ export class OrderValidationError extends Error {
 }
 
 interface CreateOrderInput extends CartRevision {
+  idempotencyKey?: string;
   shippingAddress: IShippingAddress;
   paymentMethod: "COD";
 }
@@ -123,149 +132,219 @@ export class OrderService {
       postalCode: address.postalCode.trim(),
     };
 
+    const key =
+      orderData.idempotencyKey === undefined
+        ? undefined
+        : checkoutKey(orderData.idempotencyKey);
+    const fingerprint = checkoutFingerprint(
+      revision.cartId,
+      revision.version,
+      shippingAddress,
+    );
+    if (key) {
+      const existing = await committedCheckout(userId, key, fingerprint);
+      if (existing) return existing;
+    }
     const session = await mongoose.startSession();
 
     try {
-      const order = await session.withTransaction(async () => {
-        const cart = await Cart.findOne({
-          user: userId,
-          _id: revision.cartId,
-          ...revisionFilter(revision.version),
-        }).session(session);
-
-        if (!cart) throw new CartConflictError();
-        if (cart.items.length === 0) {
-          throw new OrderValidationError("Your cart is empty.");
-        }
-
-        const orderItems: IOrderItem[] = [];
-        const orderId = new Types.ObjectId();
-        const seenProducts = new Set<string>();
-
-        let subtotal = 0;
-
-        for (const cartItem of cart.items) {
-          const productId = cartItem.product.toString();
-
-          const quantity = cartItem.quantity;
-
-          if (
-            seenProducts.has(productId) ||
-            !Number.isSafeInteger(quantity) ||
-            quantity < 1
-          ) {
-            throw new OrderValidationError("Your cart contains invalid items.");
-          }
-
-          seenProducts.add(productId);
-
-          const product = await Product.findById(productId).session(session);
-
-          if (!product || !product.isActive) {
-            throw new OrderValidationError(
-              "A product in your cart is unavailable.",
+      const order = await session.withTransaction(
+        async () => {
+          const orderId = new Types.ObjectId();
+          if (key) {
+            const existing = await CheckoutAttempt.findOne({
+              user: userId,
+              key,
+            }).session(session);
+            if (existing) {
+              if (existing.fingerprint !== fingerprint)
+                throw new CheckoutKeyConflictError();
+              const original = await Order.findOne({
+                _id: existing.order,
+                user: userId,
+              }).session(session);
+              if (!original) throw new CheckoutRetryableError();
+              return original;
+            }
+            // Unique reservation precedes stock writes and commits atomically with
+            // the result. Concurrent inserts either retry or resolve the winner.
+            await CheckoutAttempt.create(
+              [
+                {
+                  user: new Types.ObjectId(userId),
+                  key,
+                  fingerprint,
+                  order: orderId,
+                },
+              ],
+              { session },
             );
           }
+          const cart = await Cart.findOne({
+            user: userId,
+            _id: revision.cartId,
+            ...revisionFilter(revision.version),
+          }).session(session);
 
-          if (!Number.isFinite(product.price) || product.price < 0) {
-            throw new OrderValidationError(
-              `Invalid price for ${product.name}.`,
-            );
+          if (!cart) throw new CartConflictError();
+          if (cart.items.length === 0) {
+            throw new OrderValidationError("Your cart is empty.");
           }
 
-          // Atomic stock check and deduction.
-          const stockBefore = await Product.findOneAndUpdate(
-            {
-              _id: product._id,
-              isActive: true,
-              stock: { $gte: quantity },
-            },
-            {
-              $inc: { stock: -quantity },
-            },
-            { session, returnDocument: "before" },
+          const orderItems: IOrderItem[] = [];
+          const seenProducts = new Set<string>();
+
+          let subtotal = 0;
+
+          for (const cartItem of cart.items) {
+            const productId = cartItem.product.toString();
+
+            const quantity = cartItem.quantity;
+
+            if (
+              seenProducts.has(productId) ||
+              !Number.isSafeInteger(quantity) ||
+              quantity < 1
+            ) {
+              throw new OrderValidationError(
+                "Your cart contains invalid items.",
+              );
+            }
+
+            seenProducts.add(productId);
+
+            const product = await Product.findById(productId).session(session);
+
+            if (!product || !product.isActive) {
+              throw new OrderValidationError(
+                "A product in your cart is unavailable.",
+              );
+            }
+
+            if (!Number.isFinite(product.price) || product.price < 0) {
+              throw new OrderValidationError(
+                `Invalid price for ${product.name}.`,
+              );
+            }
+
+            // Atomic stock check and deduction.
+            const stockBefore = await Product.findOneAndUpdate(
+              {
+                _id: product._id,
+                isActive: true,
+                stock: { $gte: quantity },
+              },
+              {
+                $inc: { stock: -quantity },
+              },
+              { session, returnDocument: "before" },
+            );
+
+            if (!stockBefore) {
+              throw new OrderValidationError(
+                `Insufficient stock for ${product.name}.`,
+              );
+            }
+
+            await recordInventoryMovement(session, {
+              product: product._id,
+              type: "sale",
+              actorType: "customer",
+              actor: new Types.ObjectId(userId),
+              order: orderId,
+              adjustment: -quantity,
+              previousStock: stockBefore.stock,
+              newStock: stockBefore.stock - quantity,
+              reason: "Customer checkout",
+            });
+
+            const imageUrl =
+              product.images?.find((image) => image.isPrimary)?.url ??
+              product.images?.[0]?.url;
+
+            orderItems.push({
+              product: product._id,
+              name: product.name,
+              sku: product.sku,
+              price: product.price,
+              quantity,
+              imageUrl,
+            });
+
+            subtotal += product.price * quantity;
+          }
+
+          // Temporary MVP policy:
+          // No shipping fee until a delivery
+          // fee calculation feature is implemented.
+          const shippingFee = 0;
+          const total = subtotal + shippingFee;
+
+          const [createdOrder] = await Order.create(
+            [
+              {
+                user: new Types.ObjectId(userId),
+                _id: orderId,
+                items: orderItems,
+                shippingAddress,
+                paymentMethod: "COD",
+                paymentStatus: "unpaid",
+                orderStatus: "pending",
+                subtotal,
+                shippingFee,
+                total,
+              },
+            ],
+            { session },
           );
 
-          if (!stockBefore) {
-            throw new OrderValidationError(
-              `Insufficient stock for ${product.name}.`,
-            );
-          }
-
-          await recordInventoryMovement(session, {
-            product: product._id,
-            type: "sale",
-            actorType: "customer",
-            actor: new Types.ObjectId(userId),
-            order: orderId,
-            adjustment: -quantity,
-            previousStock: stockBefore.stock,
-            newStock: stockBefore.stock - quantity,
-            reason: "Customer checkout",
-          });
-
-          const imageUrl =
-            product.images?.find((image) => image.isPrimary)?.url ??
-            product.images?.[0]?.url;
-
-          orderItems.push({
-            product: product._id,
-            name: product.name,
-            sku: product.sku,
-            price: product.price,
-            quantity,
-            imageUrl,
-          });
-
-          subtotal += product.price * quantity;
-        }
-
-        // Temporary MVP policy:
-        // No shipping fee until a delivery
-        // fee calculation feature is implemented.
-        const shippingFee = 0;
-        const total = subtotal + shippingFee;
-
-        const [createdOrder] = await Order.create(
-          [
+          // Keep cart identity and advance its revision so old tabs cannot
+          // resurrect checked-out items, even after transaction retries.
+          const cartClear = await Cart.updateOne(
             {
-              user: new Types.ObjectId(userId),
-              _id: orderId,
-              items: orderItems,
-              shippingAddress,
-              paymentMethod: "COD",
-              paymentStatus: "unpaid",
-              orderStatus: "pending",
-              subtotal,
-              shippingFee,
-              total,
+              _id: cart._id,
+              user: userId,
+              ...revisionFilter(revision.version),
             },
-          ],
-          { session },
-        );
+            { $set: { items: [] }, $inc: { __v: 1 } },
+            { session },
+          );
 
-        // Keep cart identity and advance its revision so old tabs cannot
-        // resurrect checked-out items, even after transaction retries.
-        const cartClear = await Cart.updateOne(
-          {
-            _id: cart._id,
-            user: userId,
-            ...revisionFilter(revision.version),
-          },
-          { $set: { items: [] }, $inc: { __v: 1 } },
-          { session },
-        );
+          if (cartClear.modifiedCount !== 1) throw new CartConflictError();
 
-        if (cartClear.modifiedCount !== 1) throw new CartConflictError();
-
-        return createdOrder;
-      });
+          return createdOrder;
+        },
+        {
+          readConcern: { level: "snapshot" },
+          writeConcern: { w: "majority" },
+          maxCommitTimeMS: 5000,
+          timeoutMS: 15000,
+        },
+      );
 
       if (!order) {
         throw new Error("Order creation failed.");
       }
 
       return order;
+    } catch (error) {
+      if (key) {
+        // Resolve duplicate-key races and uncertain commit results outside the
+        // aborted/ended transaction, before returning a consumed-cart conflict.
+        const existing = await committedCheckout(userId, key, fingerprint);
+        if (existing) return existing;
+        if (
+          (error instanceof mongoose.mongo.MongoServerError &&
+            (error.code === 11000 || error.code === 50)) ||
+          (error instanceof mongoose.mongo.MongoError &&
+            (error.hasErrorLabel("UnknownTransactionCommitResult") ||
+              error.hasErrorLabel("TransientTransactionError") ||
+              error.name === "MongoOperationTimeoutError" ||
+              error.name === "MongoNetworkTimeoutError"))
+        )
+          throw new CheckoutRetryableError();
+      }
+      throw error;
     } finally {
       await session.endSession();
     }

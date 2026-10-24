@@ -1,4 +1,11 @@
 import {
+  checkoutKey,
+  committedCheckout,
+  CheckoutKeyValidationError,
+  CheckoutKeyConflictError,
+  CheckoutRetryableError,
+} from "../services/checkoutAttempt.service";
+import {
   parseCustomerOrderQuery,
   CustomerOrderQueryError,
 } from "../services/customerOrderList.query";
@@ -11,6 +18,41 @@ import {
 } from "../services/cart.service";
 
 export class OrderController {
+  static async getCheckoutAttempt(
+    req: AuthRequest,
+    res: Response,
+  ): Promise<void> {
+    res.setHeader("Cache-Control", "no-store");
+    if (!req.user) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    try {
+      const order = await committedCheckout(
+        req.user.id,
+        checkoutKey(req.params.key),
+      );
+      if (!order) {
+        res.status(404).json({
+          code: "CHECKOUT_NOT_FOUND",
+          message: "No committed order found yet. Retry checking this attempt.",
+        });
+        return;
+      }
+      res.json(order);
+    } catch (error) {
+      if (error instanceof CheckoutKeyValidationError) {
+        res.status(400).json({ message: error.message });
+        return;
+      }
+      res.status(503).setHeader("Retry-After", "1");
+      res.json({
+        code: "CHECKOUT_RETRYABLE",
+        message: "Unable to confirm checkout status. Check this attempt again.",
+      });
+    }
+  }
+
   static async cancelOwnOrder(req: AuthRequest, res: Response): Promise<void> {
     res.setHeader("Cache-Control", "no-store");
     if (!req.user) {
@@ -63,15 +105,28 @@ export class OrderController {
         return;
       }
 
+      res.setHeader("Cache-Control", "no-store");
       const order = await OrderService.createOrder(req.user.id, req.body);
 
       res.status(201).json(order);
     } catch (error) {
+      if (error instanceof CheckoutKeyConflictError) {
+        res
+          .status(409)
+          .json({ code: "CHECKOUT_KEY_CONFLICT", message: error.message });
+        return;
+      }
+      if (error instanceof CheckoutRetryableError) {
+        res.status(503).setHeader("Retry-After", "1");
+        res.json({ code: "CHECKOUT_RETRYABLE", message: error.message });
+        return;
+      }
       if (error instanceof CartConflictError) {
-        res.status(409).json({ message: error.message });
+        res.status(409).json({ code: "CART_CONFLICT", message: error.message });
         return;
       }
       if (
+        error instanceof CheckoutKeyValidationError ||
         error instanceof OrderValidationError ||
         error instanceof CartValidationError
       ) {
@@ -81,13 +136,8 @@ export class OrderController {
         return;
       }
 
-      console.error("Create order failed:", error);
-
       res.status(500).json({
         message: "Failed to place order.",
-        ...(process.env.NODE_ENV !== "production" && {
-          error: error instanceof Error ? error.message : String(error),
-        }),
       });
     }
   }
