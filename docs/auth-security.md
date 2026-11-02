@@ -56,7 +56,8 @@ bcrypt hashing (cost 10 for new passwords) are unchanged.
 ## Current accounts and revocation
 
 Every `protect` request verifies the JWT and checks that its user still exists.
-Only the current `isAdmin` role is loaded. `requireAdmin` shares this lookup through
+Only the current `isAdmin` role and authentication version are loaded.
+`requireAdmin` shares this lookup through
 a server-owned WeakMap keyed by the request object; no role cache survives a
 request. Deleted accounts return 401, current non-admins return 403 on admin APIs,
 and database failures fail closed with safe 500 responses. `/auth/me` separately
@@ -64,10 +65,12 @@ loads its safe profile payload. The User schema has no disabled/suspended flag;
 no such status was invented.
 
 Deletion/demotion takes effect on the next request, not midway through an already
-authorized operation. Existing tokens for active users still work until expiry;
-logout/password changes cannot revoke individual tokens. No refresh tokens,
-denylist, session version, password reset, or session architecture redesign is
-included here.
+authorized operation. Password reset atomically increments a per-user
+authentication version, rejecting previously issued JWTs on their next protected
+request. Existing JWTs without a version claim are treated as version zero for
+backward compatibility. Logout remains client-side; no refresh-token or token
+denylist system is used. See `password-reset.md` for reset-token storage, delivery,
+expiry, and rate-limiting details.
 
 ## Validation
 

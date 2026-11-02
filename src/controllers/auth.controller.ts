@@ -18,6 +18,31 @@ function authFailure(error: unknown, res: Response): void {
   }
 }
 export class AuthController {
+  static async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      await AuthService.requestPasswordReset(req.body);
+    } catch (error) {
+      if (error instanceof AuthValidationError) {
+        res.status(400).json({ message: error.message });
+        return;
+      }
+      // Keep the account-existence response identical when mail delivery fails.
+    }
+    res.status(200).json({
+      message:
+        "If an account exists for that email, password reset instructions will be sent.",
+    });
+  }
+
+  static async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+      await AuthService.resetPassword(req.body);
+      res.status(200).json({ message: "Password updated successfully." });
+    } catch (error) {
+      authFailure(error, res);
+    }
+  }
+
   static async register(req: Request, res: Response): Promise<void> {
     try {
       const result = await AuthService.register(req.body);

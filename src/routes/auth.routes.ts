@@ -4,6 +4,8 @@ import { protect } from "../middleware/auth.middleware";
 import {
   createAuthRateLimiter,
   LOGIN_RATE_LIMIT,
+  PASSWORD_RESET_REQUEST_RATE_LIMIT,
+  PASSWORD_RESET_SUBMIT_RATE_LIMIT,
   REGISTRATION_RATE_LIMIT,
 } from "../middleware/authRateLimit";
 
@@ -15,6 +17,18 @@ router.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
 });
+router.post(
+  "/forgot-password",
+  createAuthRateLimiter(PASSWORD_RESET_REQUEST_RATE_LIMIT),
+  authJson,
+  AuthController.forgotPassword,
+);
+router.post(
+  "/reset-password",
+  createAuthRateLimiter(PASSWORD_RESET_SUBMIT_RATE_LIMIT),
+  authJson,
+  AuthController.resetPassword,
+);
 router.post(
   "/register",
   createAuthRateLimiter(REGISTRATION_RATE_LIMIT),

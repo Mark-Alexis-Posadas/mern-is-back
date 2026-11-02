@@ -10,6 +10,12 @@ export const getJwtSecret = (): string => {
   return secret;
 };
 
-export const generateToken = (userId: string, isAdmin: boolean): string => {
-  return jwt.sign({ id: userId, isAdmin }, getJwtSecret(), { expiresIn: "7d" });
+export const generateToken = (
+  userId: string,
+  isAdmin: boolean,
+  authVersion = 0,
+): string => {
+  return jwt.sign({ id: userId, isAdmin, authVersion }, getJwtSecret(), {
+    expiresIn: "7d",
+  });
 };

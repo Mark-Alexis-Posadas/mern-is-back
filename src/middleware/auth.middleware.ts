@@ -54,6 +54,14 @@ export const protect = async (
       res.status(401).json({ message: "Authentication required" });
       return;
     }
+    if (
+      (decoded.authVersion !== undefined &&
+        typeof decoded.authVersion !== "number") ||
+      (decoded.authVersion ?? 0) !== user.authVersion
+    ) {
+      res.status(401).json({ message: "Authentication required" });
+      return;
+    }
     req.user = { id: decoded.id, isAdmin: user.isAdmin };
     next();
   } catch {

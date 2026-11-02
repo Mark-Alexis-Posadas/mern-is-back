@@ -9,6 +9,14 @@ interface RateLimitOptions {
 
 export const LOGIN_RATE_LIMIT = { limit: 10, windowMs: 15 * 60 * 1000 };
 export const REGISTRATION_RATE_LIMIT = { limit: 5, windowMs: 60 * 60 * 1000 };
+export const PASSWORD_RESET_REQUEST_RATE_LIMIT = {
+  limit: 3,
+  windowMs: 60 * 60 * 1000,
+};
+export const PASSWORD_RESET_SUBMIT_RATE_LIMIT = {
+  limit: 10,
+  windowMs: 15 * 60 * 1000,
+};
 
 // Process-local fixed windows. All attempts count, including successful and
 // malformed requests. A shared store/gateway is required across server instances.

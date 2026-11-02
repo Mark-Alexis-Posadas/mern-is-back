@@ -101,3 +101,19 @@ export function validateRegistration(input: unknown): RegistrationInput {
     password: passwordInput(body.password, true),
   };
 }
+
+export function validateForgotPassword(input: unknown): { email: string } {
+  const body = bodyObject(input);
+  return { email: emailInput(body.email) };
+}
+
+export function validateResetPassword(input: unknown): {
+  token: string;
+  password: string;
+} {
+  const body = bodyObject(input);
+  if (typeof body.token !== "string" || !/^[a-f0-9]{64}$/.test(body.token)) {
+    throw new AuthValidationError("This reset link is invalid or expired.");
+  }
+  return { token: body.token, password: passwordInput(body.password, true) };
+}

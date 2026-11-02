@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { after, before, mock, test } from "node:test";
 import type { AddressInfo } from "node:net";
 import express from "express";
@@ -67,7 +68,9 @@ before(() => {
     queries++;
     assert.equal(typeof query.email, "string");
     if (databaseFails) throw new Error(privateError);
-    return users.get(String(query.email)) ?? null;
+    const user = users.get(String(query.email));
+    if (query.isAdmin === false && user?.isAdmin) return null;
+    return user ?? null;
   });
   mock.method(User, "findById", (id: unknown) => ({
     select: (projection: string) => ({
@@ -78,8 +81,12 @@ before(() => {
           (user) => String(user._id) === id,
         );
         if (!user) return null;
-        if (projection === "isAdmin") return { isAdmin: user.isAdmin };
-        assert.equal(projection, "-password");
+        if (projection === "isAdmin authVersion")
+          return {
+            isAdmin: user.isAdmin,
+            authVersion: user.authVersion ?? 0,
+          };
+        assert.equal(projection, "-password -authVersion");
         const safe = user.toObject();
         delete (safe as Partial<IUser>).password;
         return safe;
@@ -93,6 +100,138 @@ before(() => {
     users.set(this.email, this);
     return this;
   });
+});
+
+test("customer password reset stores only a hash and atomically consumes the link", async (t) => {
+  const user = new User({
+    name: "Reset Fixture",
+    email: "reset@example.test",
+    password: await bcrypt.hash("OldPassword1", 10),
+    isAdmin: false,
+  });
+  const admin = new User({
+    name: "Admin Fixture",
+    email: "admin-reset@example.test",
+    password: "unused",
+    isAdmin: true,
+  });
+  users.set(user.email, user);
+  users.set(admin.email, admin);
+  const previousSession = jwt.sign(
+    { id: String(user._id), isAdmin: false },
+    secret,
+    { expiresIn: "1h" },
+  );
+  const original = {
+    RESEND_API_KEY: process.env.RESEND_API_KEY,
+    PASSWORD_RESET_FROM: process.env.PASSWORD_RESET_FROM,
+    CLIENT_URL: process.env.CLIENT_URL,
+  };
+  process.env.RESEND_API_KEY = "test-key";
+  process.env.PASSWORD_RESET_FROM = "ShopSphere <test@example.test>";
+  process.env.CLIENT_URL = "https://shop.example.test";
+  let storedHash = "";
+  t.mock.method(User, "updateOne", async (_filter, update) => {
+    storedHash = update.$set.resetPasswordTokenHash;
+    user.resetPasswordTokenHash = storedHash;
+    user.resetPasswordExpiresAt = update.$set.resetPasswordExpiresAt;
+    return { acknowledged: true };
+  });
+  let mailBody = "";
+  let failEmail = false;
+  const originalFetch = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    if (String(url).startsWith("https://api.resend.com/")) {
+      mailBody = String(init?.body ?? "");
+      return new Response("{}", { status: failEmail ? 503 : 200 });
+    }
+    return originalFetch(url, init);
+  });
+
+  try {
+    const existing = await request("/api/auth/forgot-password", {
+      email: user.email,
+    });
+    const missing = await request("/api/auth/forgot-password", {
+      email: "missing@example.test",
+    });
+    const adminRequest = await request("/api/auth/forgot-password", {
+      email: admin.email,
+    });
+    assert.equal(existing.status, 200);
+    assert.equal(missing.status, 200);
+    assert.equal(adminRequest.status, 200);
+    const publicResponse = await missing.json();
+    assert.deepEqual(await existing.json(), publicResponse);
+    assert.deepEqual(await adminRequest.json(), publicResponse);
+    const limited = await request("/api/auth/forgot-password", {
+      email: user.email,
+    });
+    assert.equal(limited.status, 429);
+
+    assert.ok(mailBody.length > 0, "expected the configured mailer to run");
+    const match = mailBody.match(/token=([a-f0-9]{64})/);
+    assert.ok(match);
+    const token = match[1]!;
+    assert.equal(token.length, 64);
+    assert.equal(storedHash, createHash("sha256").update(token).digest("hex"));
+    assert.notEqual(storedHash, token);
+    await assert.rejects(
+      AuthService.resetPassword({ token, password: "weak" }),
+      /Password must contain at least 8 characters/,
+    );
+
+    let consumes = 0;
+    let expired = false;
+    t.mock.method(User, "findOneAndUpdate", async (_filter, update) => {
+      assert.equal(_filter.isAdmin, false);
+      assert.ok(_filter.resetPasswordExpiresAt.$gt instanceof Date);
+      if (expired || _filter.resetPasswordTokenHash !== storedHash) return null;
+      consumes++;
+      if (consumes > 1) return null;
+      user.password = update.$set.password;
+      user.authVersion = (user.authVersion ?? 0) + update.$inc.authVersion;
+      user.resetPasswordTokenHash = undefined;
+      user.resetPasswordExpiresAt = undefined;
+      return user;
+    });
+    await assert.rejects(
+      AuthService.resetPassword({
+        token: "f".repeat(64),
+        password: "NewPassword2",
+      }),
+      /invalid or expired/,
+    );
+    expired = true;
+    await assert.rejects(
+      AuthService.resetPassword({ token, password: "NewPassword2" }),
+      /invalid or expired/,
+    );
+    expired = false;
+    const outcomes = await Promise.allSettled([
+      AuthService.resetPassword({ token, password: "NewPassword2" }),
+      AuthService.resetPassword({ token, password: "NewPassword2" }),
+    ]);
+    assert.equal(
+      outcomes.filter((result) => result.status === "fulfilled").length,
+      1,
+    );
+    assert.equal(consumes, 2);
+    assert.equal(user.resetPasswordTokenHash, undefined);
+    assert.equal(
+      (await request("/protected", undefined, previousSession)).status,
+      401,
+    );
+    assert.equal(await bcrypt.compare("NewPassword2", user.password), true);
+    assert.equal(await bcrypt.compare("OldPassword1", user.password), false);
+    failEmail = true;
+    await AuthService.requestPasswordReset({ email: user.email });
+  } finally {
+    for (const [key, value] of Object.entries(original)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 after(async () => {
@@ -142,6 +281,7 @@ test("valid registration normalizes inputs, hashes the password and ignores inje
   assert.equal(body.user.email, "jane@example.test");
   assert.equal(body.user.isAdmin, false);
   assert.equal(body.user.password, undefined);
+  assert.equal(body.user.authVersion, undefined);
   assert.equal(typeof body.token, "string");
   const claims = jwt.verify(body.token, secret);
   assert.ok(typeof claims !== "string");
@@ -181,6 +321,7 @@ test("valid client/admin login preserves response shape and existing weak/long p
     assert.equal(body.user.email, email);
     assert.equal(body.user.isAdmin, isAdmin);
     assert.equal(body.user.password, undefined);
+    assert.equal(body.user.authVersion, undefined);
     assert.equal(typeof body.token, "string");
   }
 });

@@ -4,6 +4,9 @@ export interface IUser extends Document {
   name: string;
   email: string;
   password: string;
+  resetPasswordTokenHash?: string;
+  resetPasswordExpiresAt?: Date;
+  authVersion: number;
   isAdmin: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -20,6 +23,9 @@ const userSchema = new Schema<IUser>(
       index: true,
     },
     password: { type: String, required: true },
+    resetPasswordTokenHash: { type: String, select: false },
+    resetPasswordExpiresAt: { type: Date, select: false },
+    authVersion: { type: Number, required: true, default: 0 },
 
     isAdmin: { type: Boolean, required: true, default: false },
   },

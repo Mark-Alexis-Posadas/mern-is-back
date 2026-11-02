@@ -8,7 +8,10 @@ import mongoose from "mongoose";
 
 // Never reads MONGO_URI/.env. Only a new process, random loopback port, and
 // unique temporary dbpath are used. Startup polling is not test synchronization.
-export async function startCartReplicaSet() {
+export async function startCartReplicaSet(
+  databaseName:
+    "cart_concurrency_test" | "shopsphere_e2e" = "cart_concurrency_test",
+) {
   const directory = await mkdtemp(join(tmpdir(), "shopsphere-cart-test-"));
   let mongo: ChildProcess | undefined;
   async function stop() {
@@ -70,7 +73,7 @@ export async function startCartReplicaSet() {
         throw new Error("Isolated replica set exited during startup.");
       try {
         await mongoose.connect(
-          `mongodb://127.0.0.1:${port}/cart_concurrency_test?directConnection=true`,
+          `mongodb://127.0.0.1:${port}/${databaseName}?directConnection=true`,
           { serverSelectionTimeoutMS: 500, autoIndex: false },
         );
         connected = true;

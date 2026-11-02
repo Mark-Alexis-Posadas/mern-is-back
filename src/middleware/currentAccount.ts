@@ -3,6 +3,7 @@ import type { AuthRequest } from "./auth.middleware";
 
 interface CurrentAccount {
   isAdmin: boolean;
+  authVersion: number;
 }
 // Server-owned cache tied to the actual request object; never persisted, sent to
 // clients, or reused across requests. Both protect and requireAdmin use it.
@@ -18,8 +19,13 @@ export function currentAccount(
   const cached = accounts.get(req);
   if (cached?.id === id) return cached.account;
   const account = Promise.resolve().then(async () => {
-    const user = await User.findById(id).select("isAdmin").lean();
-    return user ? { isAdmin: user.isAdmin === true } : null;
+    const user = await User.findById(id).select("isAdmin authVersion").lean();
+    return user
+      ? {
+          isAdmin: user.isAdmin === true,
+          authVersion: user.authVersion ?? 0,
+        }
+      : null;
   });
   accounts.set(req, { id, account });
   return account;
